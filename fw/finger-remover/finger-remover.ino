@@ -9,94 +9,145 @@
 #define INPUT_ENC_A 12
 #define INPUT_ENC_B 13
 
-#define FEEDER_MM_PER_STEP 7.5
+#define TFT_DISP_DC 0
+#define TFT_DISP_RESET 1
+#define TFT_DISP_CS 2
+
+#define FEEDER_10xMM_PER_STEP 74
 
 #include <Servo.h>
+#include "encoder.hpp"
+#include <string>
+
+#include <TFT.h> // Hardware-specific library
+#include <SPI.h>
 
 Servo g_feeder;
 Servo g_cutter;
 
-class Enc {
-public:
-	Enc(int pin_a, int pin_b):
-		counter(0),
-		old_AB(3),
-		encval(0),
-		pinA(pin_a), pinB(pin_b),
-		enc_states({0,-1,1,0,1,0,0,-1,-1,0,0,1,0,1,-1,0}) {
-		pinMode(pinA, INPUT_PULLUP);
-		pinMode(pinB, INPUT_PULLUP);
-	}
+enc_util::Enc g_feeder_enc(FEEDER_ENC_A, FEEDER_ENC_B);
+enc_util::Enc g_input_enc(INPUT_ENC_A, INPUT_ENC_B);
 
-	int read() {
-		old_AB <<=2;  // Remember previous state  
+TFT g_screen = TFT(TFT_DISP_CS, TFT_DISP_DC, TFT_DISP_RESET);
 
-		if (digitalRead(pinA)) old_AB |= 0x02; // Add current state of pin A
-		if (digitalRead(pinB)) old_AB |= 0x01; // Add current state of pin B
-
-		encval += enc_states[( old_AB & 0x0f )];
-
-		// Update counter if encoder has rotated a full indent, that is at least 4 steps
-		if( encval > 3 ) {        // Four steps forward
-			encval = 0;
-			return 1;              // Increase counter
-		}
-		else if( encval < -3 ) {  // Four steps backwards
-			encval = 0;
-			return -1;               // Decrease counter
-		}
-
-		return 0;
-	}
-
-	int readCont() {
-		counter += read();
-		return counter;
-	}
-
-private:
-	int counter;
-	uint8_t old_AB;
-	int8_t encval;
-	int pinA;
-	int pinB;
-
-	const int8_t enc_states[16];
+class enum EMenu: uint8_t {
+	Main = 0,
+	CalibrateHalfStep,
+	StartSetLen,
+	StartSetNum,
+	Cutting
 };
 
-Enc g_feeder_enc(FEEDER_ENC_A, FEEDER_ENC_B);
-Enc g_input_enc(INPUT_ENC_A, INPUT_ENC_B);
+
+EMenu curr_menu = EMenu::Main;
+
+uint16_t target_len = 0;
+uint16_t target_rep = 0;
 
 void setup() {
-	g_feeder.attach(FEEDER_PIN);
+	// g_feeder.attach(FEEDER_PIN);
 	g_cutter.attach(CUTTER_PIN);
 
 	g_cutter.write(180);
-	g_feeder.writeMicroseconds(1500);
+	// g_feeder.writeMicroseconds(1500);
 
 	pinMode(INPUT_ENC_SW, INPUT_PULLUP);
+
+	g_screen.begin();
+	g_screen.background(0,0,0);
 
 	Serial.begin(115200); // Change to 9600 for Nano, 115200 for ESP32
 }
 
-int read_encoders(int pin_a, int pin_b);
+void calibrateStepTime();
+void performCutting();
 
 void loop() {
-	int inpt = g_input_enc.readCont();
+	if (curr_menu == EMenu::CalibrateHalfStep) {
+		calibrateStepTime();
+		curr_menu = EMenu::Main;
+		return;
+	} else if (curr_menu == EMenu::StartSetLen) {
+		int inpt = g_input_enc.readCont();
 
-	g_feeder.writeMicroseconds(1500 + 10*inpt);
+		uint16_t result = abs(inpt) * FEEDER_10xMM_PER_STEP / 10;
 
-	if (inpt == 0) {
-		if (g_feeder.attached()) {
-			g_feeder.detach();
+		std::string text = std::to_string(result) + "mm";
+
+		g_screen.background(0,0,0);
+		g_screen.stroke(255, 255, 255);
+		g_screen.noFill();
+
+		g_screen.textWrap(text.c_str(), 0, 20);
+
+		if (!digitalRead(INPUT_ENC_SW)) {
+			target_rep = result;
+			curr_menu = EMenu::StartSetNum;
+			g_input_enc.resetPos();
 		}
+
+		delay(100);
+		return;
+	} else if (curr_menu == EMenu::StartSetNum) {
+		int inpt = g_input_enc.readCont();
+
+		uint16_t result = abs(inpt);
+
+		std::string text = std::string("x") + std::to_string(result);
+
+		g_screen.background(0,0,0);
+		g_screen.stroke(255, 255, 255);
+		g_screen.noFill();
+
+		g_screen.textWrap(text.c_str(), 0, 20);
+
+		if (!digitalRead(INPUT_ENC_SW)) {
+			target_len = result;
+			curr_menu = EMenu::Cutting;
+			g_input_enc.resetPos();
+		}
+
+		delay(100);
+		return;
+	} else if (curr_menu == EMenu::Cutting) {
+		performCutting();
+		curr_menu = EMenu::Main;
+		return;
 	} else {
-		if (!g_feeder.attached()) {
-			g_feeder.attach(FEEDER_PIN);
+		int inpt = g_input_enc.readCont() % 2 + 1;
+
+		std::string text = (inpt == 1) ? "cal" : "start";
+
+		g_screen.background(0,0,0);
+		g_screen.stroke(255, 255, 255);
+		g_screen.noFill();
+
+		g_screen.textWrap(text.c_str(), 0, 20);
+
+		if (!digitalRead(INPUT_ENC_SW)) {
+			curr_menu = (EMenu)inpt;
+			g_input_enc.resetPos();
 		}
+
+		delay(100);
+		return;
 	}
 
-	Serial.print(g_feeder_enc.readCont());
-	Serial.print(", ");
-	Serial.println(inpt);
+	// int inpt = g_input_enc.readCont();
+
+	// g_feeder.writeMicroseconds(1500 + 10*inpt);
+
+	// if (inpt == 0) {
+	// 	if (g_feeder.attached()) {
+	// 		g_feeder.detach();
+	// 	}
+	// } else {
+	// 	if (!g_feeder.attached()) {
+	// 		g_feeder.attach(FEEDER_PIN);
+	// 	}
+	// }
+
+	// Serial.print(g_feeder_enc.readCont());
+	// Serial.print(", ");
+	// Serial.println(inpt);
 }
