@@ -17,7 +17,6 @@
 
 #include <Servo.h>
 #include "encoder.hpp"
-#include <string>
 
 #include <TFT.h> // Hardware-specific library
 #include <SPI.h>
@@ -30,7 +29,7 @@ enc_util::Enc g_input_enc(INPUT_ENC_A, INPUT_ENC_B);
 
 TFT g_screen = TFT(TFT_DISP_CS, TFT_DISP_DC, TFT_DISP_RESET);
 
-class enum EMenu: uint8_t {
+enum class EMenu: uint8_t {
 	Main = 0,
 	CalibrateHalfStep,
 	StartSetLen,
@@ -55,6 +54,7 @@ void setup() {
 
 	g_screen.begin();
 	g_screen.background(0,0,0);
+	g_screen.setTextSize(3);
 
 	Serial.begin(115200); // Change to 9600 for Nano, 115200 for ESP32
 }
@@ -72,7 +72,7 @@ void loop() {
 
 		uint16_t result = abs(inpt) * FEEDER_10xMM_PER_STEP / 10;
 
-		std::string text = std::to_string(result) + "mm";
+		String text = String(result) + String("mm");
 
 		g_screen.background(0,0,0);
 		g_screen.stroke(255, 255, 255);
@@ -93,7 +93,7 @@ void loop() {
 
 		uint16_t result = abs(inpt);
 
-		std::string text = std::string("x") + std::to_string(result);
+		String text = String("x") + String(result);
 
 		g_screen.background(0,0,0);
 		g_screen.stroke(255, 255, 255);
@@ -116,7 +116,7 @@ void loop() {
 	} else {
 		int inpt = g_input_enc.readCont() % 2 + 1;
 
-		std::string text = (inpt == 1) ? "cal" : "start";
+		String text = (inpt == 1) ? "cal" : "start";
 
 		g_screen.background(0,0,0);
 		g_screen.stroke(255, 255, 255);
@@ -150,4 +150,13 @@ void loop() {
 	// Serial.print(g_feeder_enc.readCont());
 	// Serial.print(", ");
 	// Serial.println(inpt);
+}
+
+
+void calibrateStepTime() {
+
+}
+
+void performCutting() {
+
 }
