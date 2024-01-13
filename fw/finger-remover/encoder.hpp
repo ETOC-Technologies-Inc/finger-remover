@@ -44,6 +44,22 @@ public:
 		return counter;
 	}
 
+	void update() {
+		counter += read();
+	}
+
+	int pos() const {
+		return counter;
+	}
+
+	int getPinA() const {
+		return pinA;
+	}
+
+	int getPinB() const {
+		return pinB;
+	}
+
 	void resetPos() {
 		counter = 0;
 	}

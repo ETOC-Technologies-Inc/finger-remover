@@ -4,14 +4,15 @@
 
 #define FEEDER_ENC_A 8
 #define FEEDER_ENC_B 9
+#define FEEDER_CENTER 1460
 
 #define INPUT_ENC_SW 11
 #define INPUT_ENC_A 12
-#define INPUT_ENC_B 13
+#define INPUT_ENC_B 10
 
-#define TFT_DISP_DC 0
-#define TFT_DISP_RESET 1
-#define TFT_DISP_CS 2
+#define TFT_DISP_DC 2
+#define TFT_DISP_RESET 3
+#define TFT_DISP_CS 4
 
 #define FEEDER_10xMM_PER_STEP 74
 
@@ -24,8 +25,17 @@
 Servo g_feeder;
 Servo g_cutter;
 
+// enc handlers
 enc_util::Enc g_feeder_enc(FEEDER_ENC_A, FEEDER_ENC_B);
 enc_util::Enc g_input_enc(INPUT_ENC_A, INPUT_ENC_B);
+
+void sleepEnc(int slp) {
+	for (int i=0; i<slp; +i++) {
+		g_feeder_enc.update();
+		g_input_enc.update();
+		delay(1);
+	}
+}
 
 TFT g_screen = TFT(TFT_DISP_CS, TFT_DISP_DC, TFT_DISP_RESET);
 
@@ -48,7 +58,7 @@ void setup() {
 	g_cutter.attach(CUTTER_PIN);
 
 	g_cutter.write(180);
-	// g_feeder.writeMicroseconds(1500);
+	// g_feeder.writeMicroseconds(1460);
 
 	pinMode(INPUT_ENC_SW, INPUT_PULLUP);
 
@@ -68,28 +78,28 @@ void loop() {
 		curr_menu = EMenu::Main;
 		return;
 	} else if (curr_menu == EMenu::StartSetLen) {
-		int inpt = g_input_enc.readCont();
+		int inpt = g_input_enc.pos();
 
-		uint16_t result = abs(inpt) * FEEDER_10xMM_PER_STEP / 10;
+		uint16_t result = abs(inpt) * FEEDER_10xMM_PER_STEP;
 
-		String text = String(result) + String("mm");
+		String text = String(result / 10) + String("mm");
 
 		g_screen.background(0,0,0);
 		g_screen.stroke(255, 255, 255);
 		g_screen.noFill();
 
-		g_screen.textWrap(text.c_str(), 0, 20);
+		g_screen.textWrap(text.c_str(), 5, 20);
 
 		if (!digitalRead(INPUT_ENC_SW)) {
-			target_rep = result;
+			target_len = result;
 			curr_menu = EMenu::StartSetNum;
 			g_input_enc.resetPos();
 		}
 
-		delay(100);
+		sleepEnc(30);
 		return;
 	} else if (curr_menu == EMenu::StartSetNum) {
-		int inpt = g_input_enc.readCont();
+		int inpt = g_input_enc.pos();
 
 		uint16_t result = abs(inpt);
 
@@ -99,22 +109,22 @@ void loop() {
 		g_screen.stroke(255, 255, 255);
 		g_screen.noFill();
 
-		g_screen.textWrap(text.c_str(), 0, 20);
+		g_screen.textWrap(text.c_str(), 5, 20);
 
 		if (!digitalRead(INPUT_ENC_SW)) {
-			target_len = result;
+			target_rep = result;
 			curr_menu = EMenu::Cutting;
 			g_input_enc.resetPos();
 		}
 
-		delay(100);
+		sleepEnc(30);
 		return;
 	} else if (curr_menu == EMenu::Cutting) {
 		performCutting();
 		curr_menu = EMenu::Main;
 		return;
 	} else {
-		int inpt = g_input_enc.readCont() % 2 + 1;
+		int inpt = g_input_enc.pos() % 2 + 1;
 
 		String text = (inpt == 1) ? "cal" : "start";
 
@@ -122,34 +132,20 @@ void loop() {
 		g_screen.stroke(255, 255, 255);
 		g_screen.noFill();
 
-		g_screen.textWrap(text.c_str(), 0, 20);
+		g_screen.textWrap(text.c_str(), 5, 20);
 
 		if (!digitalRead(INPUT_ENC_SW)) {
-			curr_menu = (EMenu)inpt;
+			Serial.println("press");
+			curr_menu = (inpt == 1) ? EMenu::CalibrateHalfStep : EMenu::StartSetLen;
 			g_input_enc.resetPos();
 		}
 
-		delay(100);
+		sleepEnc(30);
+
 		return;
 	}
 
-	// int inpt = g_input_enc.readCont();
-
-	// g_feeder.writeMicroseconds(1500 + 10*inpt);
-
-	// if (inpt == 0) {
-	// 	if (g_feeder.attached()) {
-	// 		g_feeder.detach();
-	// 	}
-	// } else {
-	// 	if (!g_feeder.attached()) {
-	// 		g_feeder.attach(FEEDER_PIN);
-	// 	}
-	// }
-
-	// Serial.print(g_feeder_enc.readCont());
-	// Serial.print(", ");
-	// Serial.println(inpt);
+	sleepEnc(500);
 }
 
 
@@ -158,5 +154,30 @@ void calibrateStepTime() {
 }
 
 void performCutting() {
+	for (int i=0; i<target_rep; i++) {
+		g_feeder_enc.resetPos();
+		g_feeder.attach(FEEDER_PIN);
+		// reverse a bit
+		while ((FEEDER_10xMM_PER_STEP*2 - abs(g_feeder_enc.readCont()) * FEEDER_10xMM_PER_STEP) > 0) {
+			g_feeder.write(FEEDER_CENTER - 50);
+		}
+		sleepEnc(30);
+		g_feeder_enc.resetPos();
+		while ((FEEDER_10xMM_PER_STEP*2 - abs(g_feeder_enc.readCont()) * FEEDER_10xMM_PER_STEP) > 0) {
+			g_feeder.write(FEEDER_CENTER + 50);
+		}
+		g_feeder_enc.resetPos();
+		sleepEnc(30);
 
+		while ((target_len - abs(g_feeder_enc.readCont()) * FEEDER_10xMM_PER_STEP) > 0) {
+			g_feeder.write(FEEDER_CENTER + 100);
+		}
+		g_feeder.write(FEEDER_CENTER);
+		sleepEnc(30);
+		g_feeder.detach();
+		g_cutter.write(0);
+		sleepEnc(1000);
+		g_cutter.write(180);
+		sleepEnc(1000);
+	}
 }
