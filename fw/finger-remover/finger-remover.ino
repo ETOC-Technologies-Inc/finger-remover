@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 
 #define FEEDER_PIN 6
 #define CUTTER_PIN 5
