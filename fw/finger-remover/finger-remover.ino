@@ -1,6 +1,7 @@
 
 #define FEEDER_PIN 6
 #define CUTTER_PIN 5
+#define HOLLER_PIN 4
 
 #define FEEDER_ENC_A 0
 #define FEEDER_ENC_B 1
@@ -29,6 +30,7 @@
 
 Servo g_feeder;
 Servo g_cutter;
+Servo g_holler;
 
 // enc handlers
 Encoder g_feeder_enc(FEEDER_ENC_A, FEEDER_ENC_B);
@@ -54,6 +56,7 @@ EMenu curr_menu = EMenu::Main;
 // op states
 uint16_t target_len_10x = 0;
 uint16_t target_rep = 0;
+int16_t cutter_manual_move_target = 0;
 bool g_button_flag = false;
 int16_t g_feeder_center_offset = 0;
 uint32_t g_time_per_enc_step = 0;
@@ -61,8 +64,10 @@ uint32_t g_time_per_enc_step = 0;
 void setup() {
 	g_feeder.attach(FEEDER_PIN);
 	g_cutter.attach(CUTTER_PIN);
+	g_holler.attach(HOLLER_PIN);
 
 	g_cutter.write(180);
+	g_holler.write(180);
 
 	pinMode(INPUT_ENC_SW, INPUT_PULLUP);
 
@@ -89,7 +94,7 @@ void loop() {
 		curr_menu = EMenu::Main;
 		return;
 	} else if (curr_menu == EMenu::ControlFeeder) {
-		int inpt = g_input_enc.read();
+		int inpt = g_input_enc.read() / 2;
 
 		int result = inpt * FEEDER_10xMM_PER_STEP;
 
@@ -100,9 +105,9 @@ void loop() {
 
 		g_screen.textWrap(text.c_str(), 5, 20);
 
-		if (target_len_10x != result) {
-			target_len_10x = result;
-			moveToTarget(result, (result > 0) ? 50 : -50);
+		if (cutter_manual_move_target != result) {
+			moveToTarget(abs(cutter_manual_move_target-result), ((cutter_manual_move_target-result) > 0) ? FEEDER_FEED_SPEED : -FEEDER_FEED_SPEED);
+			cutter_manual_move_target = result;
 		}
 
 		if (!digitalRead(INPUT_ENC_SW) && !g_button_flag) {
@@ -111,6 +116,7 @@ void loop() {
 			g_button_flag = false;
 
 			curr_menu = EMenu::Control;
+			cutter_manual_move_target = 0;
 			g_input_enc.readAndReset();
 		}
 
@@ -120,7 +126,7 @@ void loop() {
 
 		return;
 	} else if (curr_menu == EMenu::Control) {
-		int inpt = g_input_enc.read() % 3;
+		int inpt = abs(g_input_enc.read() / 2) % 3;
 
 		String text;
 
@@ -148,15 +154,16 @@ void loop() {
 			switch (inpt) {
 			case 0:
 				curr_menu = EMenu::ControlFeeder;
+				g_input_enc.readAndReset();
 				break;
 			case 1:
 				cycleCutter();
 				break;
 			case 2:
 				curr_menu = EMenu::Main;
+				g_input_enc.readAndReset();
 				break;
 			}
-			g_input_enc.readAndReset();
 		}
 
 		delay(100);
@@ -165,7 +172,7 @@ void loop() {
 
 		return;
 	} else if (curr_menu == EMenu::CalibrateFeederCenter) {
-		int16_t inpt = static_cast<int16_t>(g_input_enc.read());
+		int16_t inpt = static_cast<int16_t>(g_input_enc.read() / 2);
 
 		int16_t result = g_feeder_center_offset + inpt;
 
@@ -196,7 +203,7 @@ void loop() {
 
 		return;
 	} else if (curr_menu == EMenu::StartSetLen) {
-		int inpt = g_input_enc.read();
+		int inpt = g_input_enc.read() / 2;
 
 		uint16_t result = abs(inpt) * 50;
 
@@ -222,7 +229,7 @@ void loop() {
 
 		return;
 	} else if (curr_menu == EMenu::StartSetNum) {
-		int inpt = g_input_enc.read();
+		int inpt = g_input_enc.read() / 2;
 
 		uint16_t result = abs(inpt);
 
@@ -252,7 +259,8 @@ void loop() {
 		curr_menu = EMenu::Main;
 		return;
 	} else {
-		int inpt = g_input_enc.read() % 4;
+		int inpt = abs(g_input_enc.read() / 2) % 4;
+
 
 		String text;
 
@@ -334,23 +342,27 @@ void calibrateStepTime() {
 }
 
 void cycleCutter() {
+	g_holler.write(80);
+	delay(300);
 	g_cutter.write(0);
 	delay(1000);
 	g_cutter.write(180);
-	delay(1000);
+	delay(300);
+	g_holler.write(180);
+	delay(700);
 }
 
 void moveToTarget(int target, int move_dir = 50) {
 	g_feeder_enc.readAndReset();
 	if (target%FEEDER_10xMM_PER_STEP == 0 || g_time_per_enc_step == 0) {
-		while ((target - abs(g_feeder_enc.read()) * FEEDER_10xMM_PER_STEP) > 0) {
+		while ((target - abs(g_feeder_enc.read() / 2) * FEEDER_10xMM_PER_STEP) > 0) {
 			g_feeder.write((FEEDER_CENTER + g_feeder_center_offset) + move_dir);
 			delay(10);
 		}
 	} else if (g_time_per_enc_step != 0) {
 		if (target > FEEDER_10xMM_PER_STEP) {
 			int tmp_target = target - target % FEEDER_10xMM_PER_STEP;
-			while ((tmp_target - abs(g_feeder_enc.read()) * FEEDER_10xMM_PER_STEP) > 0) {
+			while ((tmp_target - abs(g_feeder_enc.read() / 2) * FEEDER_10xMM_PER_STEP) > 0) {
 				g_feeder.write((FEEDER_CENTER + g_feeder_center_offset) + move_dir);
 				delay(10);
 			}
@@ -370,9 +382,9 @@ void moveToTarget(int target, int move_dir = 50) {
 
 void performCuttingSeq() {
 	for (int i=0; i<target_rep; i++) {
-		// reverse a bit and go back
-		moveToTarget(FEEDER_10xMM_PER_STEP*2, -50);
-		moveToTarget(FEEDER_10xMM_PER_STEP*2, 50);
+		// // reverse a bit and go back
+		// moveToTarget(FEEDER_10xMM_PER_STEP*2, -50);
+		// moveToTarget(FEEDER_10xMM_PER_STEP*2, 50);
 
 		// move to target and perform the cut
 		moveToTarget(target_len_10x, FEEDER_FEED_SPEED);
