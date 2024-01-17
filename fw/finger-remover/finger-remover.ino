@@ -15,12 +15,12 @@
 #define TFT_DISP_RESET 9
 #define TFT_DISP_CS 10
 
-#define FEEDER_10xMM_PER_STEP 74
 #define FEEDER_CENTER 1500
 #define FEEDER_FEED_SPEED 100
 
 #define FEEDER_CENTOFF_ADDR 0
 #define FEEDER_STEPTIME_ADDR 32
+#define FEEDER_MM_PER_STEP_ADDR 64
 
 #include <Servo.h>
 #include <Encoder.h>
@@ -45,6 +45,7 @@ enum class EMenu: uint8_t {
 	Main = 0,
 	CalibrateHalfStep,
 	CalibrateFeederCenter,
+	CalibrateFeederMMPerStep,
 	Control,
 	ControlFeeder,
 	StartSetLen,
@@ -55,15 +56,15 @@ enum class EMenu: uint8_t {
 EMenu curr_menu = EMenu::Main;
 
 // op states
-uint16_t target_len_10x = 0;
+uint16_t target_len = 0;
 uint16_t target_rep = 0;
 int16_t cutter_manual_move_target = 0;
 bool g_button_flag = false;
 int16_t g_feeder_center_offset = 0;
 uint32_t g_time_per_enc_step = 0;
+int32_t g_feeder_100x_mm_per_step = 100;
 
 void setup() {
-	g_feeder.attach(FEEDER_PIN);
 	g_cutter.attach(CUTTER_PIN);
 	g_holler.attach(HOLLER_PIN);
 
@@ -78,8 +79,10 @@ void setup() {
 
 	// percictency
 	EEPROM.get(FEEDER_CENTOFF_ADDR, g_feeder_center_offset);
+	g_feeder.attach(FEEDER_PIN);
 	g_feeder.writeMicroseconds(FEEDER_CENTER + g_feeder_center_offset);
 	EEPROM.get(FEEDER_STEPTIME_ADDR, g_time_per_enc_step);
+	EEPROM.get(FEEDER_MM_PER_STEP_ADDR, g_feeder_100x_mm_per_step);
 
 	Serial.begin(115200);
 }
@@ -87,6 +90,7 @@ void setup() {
 void calibrateStepTime();
 void performCuttingSeq();
 void cycleCutter();
+void mmPerStepCalCut();
 void moveToTarget(int target, int move_dir = 50);
 
 void loop() {
@@ -94,10 +98,38 @@ void loop() {
 		calibrateStepTime();
 		curr_menu = EMenu::Main;
 		return;
+	} else if (curr_menu == EMenu::CalibrateFeederMMPerStep) {
+		int inpt = g_input_enc.read() / 2;
+
+		uint16_t result = abs(inpt);
+
+		String text = String(result) + String("mm");
+
+		g_screen.stroke(255, 255, 255);
+		g_screen.noFill();
+
+		g_screen.textWrap(text.c_str(), 5, 20);
+
+		if (!digitalRead(INPUT_ENC_SW) && !g_button_flag) {
+			g_button_flag = true;
+		} else if (digitalRead(INPUT_ENC_SW) && g_button_flag) {
+			g_button_flag = false;
+			g_feeder_100x_mm_per_step = result;
+			EEPROM.put(FEEDER_MM_PER_STEP_ADDR, g_feeder_100x_mm_per_step);
+			curr_menu = EMenu::Main;
+			g_input_enc.readAndReset();
+		}
+
+		delay(100);
+		g_screen.stroke(0,0,0);
+		g_screen.textWrap(text.c_str(), 5, 20);
+
+		return;
+
 	} else if (curr_menu == EMenu::ControlFeeder) {
 		int inpt = g_input_enc.read() / 2;
 
-		int result = inpt * FEEDER_10xMM_PER_STEP;
+		int result = inpt * g_feeder_100x_mm_per_step;
 
 		String text = String(inpt);
 
@@ -206,9 +238,9 @@ void loop() {
 	} else if (curr_menu == EMenu::StartSetLen) {
 		int inpt = g_input_enc.read() / 2;
 
-		uint16_t result = abs(inpt) * 50;
+		uint16_t result = abs(inpt) * g_feeder_100x_mm_per_step;
 
-		String text = String(result / 10) + String("mm");
+		String text = String(result / 100) + String("mm");
 
 		g_screen.stroke(255, 255, 255);
 		g_screen.noFill();
@@ -219,7 +251,7 @@ void loop() {
 			g_button_flag = true;
 		} else if (digitalRead(INPUT_ENC_SW) && g_button_flag) {
 			g_button_flag = false;
-			target_len_10x = result;
+			target_len = result;
 			curr_menu = EMenu::StartSetNum;
 			g_input_enc.readAndReset();
 		}
@@ -260,7 +292,7 @@ void loop() {
 		curr_menu = EMenu::Main;
 		return;
 	} else {
-		int inpt = abs(g_input_enc.read() / 2) % 4;
+		int inpt = abs(g_input_enc.read() / 2) % 5;
 
 
 		String text;
@@ -277,6 +309,9 @@ void loop() {
 			break;
 		case 3:
 			text = "half step cal";
+			break;
+		case 4:
+			text = "mm per step cal";
 			break;
 		}
 
@@ -302,6 +337,10 @@ void loop() {
 			case 3:
 				curr_menu = EMenu::CalibrateHalfStep;
 				break;
+			case 4:
+				curr_menu = EMenu::CalibrateFeederMMPerStep;
+				mmPerStepCalCut();
+				break;
 			}
 			g_input_enc.readAndReset();
 		}
@@ -319,20 +358,20 @@ void loop() {
 
 void calibrateStepTime() {
 	// make sure we are at the edge of a step rn
-	moveToTarget(FEEDER_10xMM_PER_STEP, FEEDER_FEED_SPEED);
+	moveToTarget(g_feeder_100x_mm_per_step, FEEDER_FEED_SPEED);
 
 	uint32_t avrg = 0;
 
 	for (int i=0; i < 10; i++) {
 		// time moving one step
 		uint32_t start = millis();
-		moveToTarget(FEEDER_10xMM_PER_STEP, FEEDER_FEED_SPEED);
+		moveToTarget(g_feeder_100x_mm_per_step, FEEDER_FEED_SPEED);
 		uint32_t diff = millis() - start;
 		avrg += diff;
 
 		// do same thing but in the other direction
 		start = millis();
-		moveToTarget(FEEDER_10xMM_PER_STEP, -FEEDER_FEED_SPEED);
+		moveToTarget(g_feeder_100x_mm_per_step, -FEEDER_FEED_SPEED);
 		diff = millis() - start;
 		avrg += diff;
 	}
@@ -355,40 +394,53 @@ void cycleCutter() {
 
 void moveToTarget(int target, int move_dir = 50) {
 	g_feeder_enc.readAndReset();
-	if (target%FEEDER_10xMM_PER_STEP == 0 || g_time_per_enc_step == 0) {
-		while ((target - abs(g_feeder_enc.read() / 2) * FEEDER_10xMM_PER_STEP) > 0) {
+	// if (target%g_feeder_100x_mm_per_step == 0 || g_time_per_enc_step == 0) {
+		while ((target - (abs(g_feeder_enc.read() / 2) * g_feeder_100x_mm_per_step)) > 0) {
 			g_feeder.write((FEEDER_CENTER + g_feeder_center_offset) + move_dir);
-			delay(10);
+			// delay(10);
 		}
-	} else if (g_time_per_enc_step != 0) {
-		if (target > FEEDER_10xMM_PER_STEP) {
-			int tmp_target = target - target % FEEDER_10xMM_PER_STEP;
-			while ((tmp_target - abs(g_feeder_enc.read() / 2) * FEEDER_10xMM_PER_STEP) > 0) {
-				g_feeder.write((FEEDER_CENTER + g_feeder_center_offset) + move_dir);
-				delay(10);
-			}
-			g_feeder.write((FEEDER_CENTER + g_feeder_center_offset));
-			target = target % FEEDER_10xMM_PER_STEP;
-		}
-		if (target < FEEDER_10xMM_PER_STEP) {
-			g_feeder.write((FEEDER_CENTER + g_feeder_center_offset)
-				+ ((move_dir > 0) ? FEEDER_FEED_SPEED : -FEEDER_FEED_SPEED));
-			delay(g_time_per_enc_step / 2);
-			g_feeder.write((FEEDER_CENTER + g_feeder_center_offset));
-			return;
-		}
-	}
+	// } else if (g_time_per_enc_step != 0) {
+	// 	if (target > g_feeder_100x_mm_per_step) {
+	// 		int tmp_target = target - target % g_feeder_100x_mm_per_step;
+	// 		while ((tmp_target - abs(g_feeder_enc.read() / 2) * g_feeder_100x_mm_per_step) > 0) {
+	// 			g_feeder.write((FEEDER_CENTER + g_feeder_center_offset) + move_dir);
+	// 			delay(10);
+	// 		}
+	// 		g_feeder.write((FEEDER_CENTER + g_feeder_center_offset));
+	// 		target = target % g_feeder_100x_mm_per_step;
+	// 	}
+	// 	if (target < g_feeder_100x_mm_per_step) {
+	// 		g_feeder.write((FEEDER_CENTER + g_feeder_center_offset)
+	// 			+ ((move_dir > 0) ? FEEDER_FEED_SPEED : -FEEDER_FEED_SPEED));
+	// 		delay(g_time_per_enc_step / 2);
+	// 		g_feeder.write((FEEDER_CENTER + g_feeder_center_offset));
+	// 		return;
+	// 	}
+	// }
 	g_feeder.write((FEEDER_CENTER + g_feeder_center_offset));
 }
 
-void performCuttingSeq() {
-	for (int i=0; i<target_rep; i++) {
-		// // reverse a bit and go back
-		// moveToTarget(FEEDER_10xMM_PER_STEP*2, -50);
-		// moveToTarget(FEEDER_10xMM_PER_STEP*2, 50);
+void mmPerStepCalCut() {
+	g_feeder_enc.readAndReset();
+	while (abs(g_feeder_enc.read() / 2) < 100) {
+		g_feeder.write((FEEDER_CENTER + g_feeder_center_offset) + FEEDER_FEED_SPEED);
+	}
+	g_feeder.write((FEEDER_CENTER + g_feeder_center_offset));
+	cycleCutter();
+}
 
-		// move to target and perform the cut
-		moveToTarget(target_len_10x, FEEDER_FEED_SPEED);
+void performCuttingSeq() {
+	for (int i=0; i<target_rep; i++) {		
+		String text = String("x") + String(target_rep-i);
+
+		g_screen.stroke(255, 255, 255);
+		g_screen.noFill();
+
+		g_screen.textWrap(text.c_str(), 5, 20);
+
+		moveToTarget(target_len, FEEDER_FEED_SPEED);
 		cycleCutter();
+		g_screen.stroke(0,0,0);
+		g_screen.textWrap(text.c_str(), 5, 20);
 	}
 }
