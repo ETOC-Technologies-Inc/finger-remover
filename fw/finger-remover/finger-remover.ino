@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-only
 
 #define FEEDER_PIN 6
-#define CUTTER_PIN 5
-#define HOLLER_PIN 4
+#define CUTTER_PIN 4
+#define HOLLER_PIN 5
 
 #define FEEDER_ENC_A 0
 #define FEEDER_ENC_B 1
@@ -382,10 +382,14 @@ void calibrateStepTime() {
 }
 
 void cycleCutter() {
-	g_holler.write(80);
+	g_holler.write(75);
 	delay(300);
 	g_cutter.write(0);
 	delay(1000);
+	g_cutter.write(90);
+	delay(1000);
+	g_cutter.write(0);
+	delay(500);
 	g_cutter.write(180);
 	delay(300);
 	g_holler.write(180);
