@@ -22,6 +22,8 @@
 #define FEEDER_STEPTIME_ADDR 32
 #define FEEDER_MM_PER_STEP_ADDR 64
 
+#define M_PI 3.14159265359
+
 #include <Servo.h>
 #include <Encoder.h>
 #include <EEPROM.h>
@@ -46,6 +48,7 @@ enum class EMenu: uint8_t {
 	CalibrateHalfStep,
 	CalibrateFeederCenter,
 	CalibrateFeederMMPerStep,
+	CalibrateFeederByRoller,
 	Control,
 	ControlFeeder,
 	StartSetLen,
@@ -93,10 +96,41 @@ void cycleCutter();
 void mmPerStepCalCut();
 void moveToTarget(int target, int move_dir = 50);
 
+String toString100xFloat(int32_t value) {
+	return String(value / 100) + String(".") + String(abs(value) % 100);
+}
+
 void loop() {
 	if (curr_menu == EMenu::CalibrateHalfStep) {
 		calibrateStepTime();
 		curr_menu = EMenu::Main;
+		return;
+	} else if (curr_menu == EMenu::CalibrateFeederByRoller) {
+		int inpt = g_input_enc.read() / 2;
+
+		int16_t result = abs(inpt) * 25;
+
+		String text = toString100xFloat(result) + String("mm");
+
+		g_screen.stroke(255, 255, 255);
+		g_screen.noFill();
+
+		g_screen.textWrap(text.c_str(), 5, 20);
+
+		if (!digitalRead(INPUT_ENC_SW) && !g_button_flag) {
+			g_button_flag = true;
+		} else if (digitalRead(INPUT_ENC_SW) && g_button_flag) {
+			g_button_flag = false;
+			g_feeder_100x_mm_per_step = static_cast<int32_t>(static_cast<float>(result) * M_PI / 15 / 2);
+			EEPROM.put(FEEDER_MM_PER_STEP_ADDR, g_feeder_100x_mm_per_step);
+			curr_menu = EMenu::Main;
+			g_input_enc.readAndReset();
+		}
+
+		delay(100);
+		g_screen.stroke(0,0,0);
+		g_screen.textWrap(text.c_str(), 5, 20);
+
 		return;
 	} else if (curr_menu == EMenu::CalibrateFeederMMPerStep) {
 		int inpt = g_input_enc.read() / 2;
@@ -131,7 +165,7 @@ void loop() {
 
 		int result = inpt * g_feeder_100x_mm_per_step;
 
-		String text = String(inpt);
+		String text = toString100xFloat(result);
 
 		g_screen.stroke(255, 255, 255);
 		g_screen.noFill();
@@ -240,7 +274,7 @@ void loop() {
 
 		uint16_t result = abs(inpt) * g_feeder_100x_mm_per_step;
 
-		String text = String(result / 100) + String("mm");
+		String text = toString100xFloat(result) + String("mm");
 
 		g_screen.stroke(255, 255, 255);
 		g_screen.noFill();
@@ -292,7 +326,7 @@ void loop() {
 		curr_menu = EMenu::Main;
 		return;
 	} else {
-		int inpt = abs(g_input_enc.read() / 2) % 5;
+		int inpt = abs(g_input_enc.read() / 2) % 6;
 
 
 		String text;
@@ -312,6 +346,9 @@ void loop() {
 			break;
 		case 4:
 			text = "mm per step cal";
+			break;
+		case 5:
+			text = "cal by roller";
 			break;
 		}
 
@@ -340,6 +377,9 @@ void loop() {
 			case 4:
 				curr_menu = EMenu::CalibrateFeederMMPerStep;
 				mmPerStepCalCut();
+				break;
+			case 5:
+				curr_menu = EMenu::CalibrateFeederByRoller;
 				break;
 			}
 			g_input_enc.readAndReset();
@@ -382,7 +422,7 @@ void calibrateStepTime() {
 }
 
 void cycleCutter() {
-	g_holler.write(75);
+	g_holler.write(60);
 	delay(300);
 	g_cutter.write(0);
 	delay(1000);
@@ -391,7 +431,7 @@ void cycleCutter() {
 	g_cutter.write(0);
 	delay(500);
 	g_cutter.write(180);
-	delay(300);
+	delay(600);
 	g_holler.write(180);
 	delay(700);
 }
