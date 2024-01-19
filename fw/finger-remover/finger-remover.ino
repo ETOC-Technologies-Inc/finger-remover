@@ -17,10 +17,13 @@
 
 #define FEEDER_CENTER 1500
 #define FEEDER_FEED_SPEED 100
+#define FEEDER_TO_HOLLER_OFFSET 3800 // in mm * 100, hardware set, cannot be changed
 
+// persistent memory addresses
 #define FEEDER_CENTOFF_ADDR 0
 #define FEEDER_STEPTIME_ADDR 32
 #define FEEDER_MM_PER_STEP_ADDR 64
+#define HOLE_OFFSET_ADDR 128
 
 #define M_PI 3.14159265359
 
@@ -49,6 +52,7 @@ enum class EMenu: uint8_t {
 	CalibrateFeederCenter,
 	CalibrateFeederMMPerStep,
 	CalibrateFeederByRoller,
+	SetHoleOffset,
 	Control,
 	ControlFeeder,
 	StartSetLen,
@@ -63,9 +67,12 @@ uint16_t target_len = 0;
 uint16_t target_rep = 0;
 int16_t cutter_manual_move_target = 0;
 bool g_button_flag = false;
+
+// persistency
 int16_t g_feeder_center_offset = 0;
 uint32_t g_time_per_enc_step = 0;
 int32_t g_feeder_100x_mm_per_step = 100;
+int32_t g_hole_offset_100x_mm = 0;
 
 void setup() {
 	g_cutter.attach(CUTTER_PIN);
@@ -80,12 +87,13 @@ void setup() {
 	g_screen.background(0,0,0);
 	g_screen.setTextSize(3);
 
-	// percictency
+	// persistency
 	EEPROM.get(FEEDER_CENTOFF_ADDR, g_feeder_center_offset);
 	g_feeder.attach(FEEDER_PIN);
 	g_feeder.writeMicroseconds(FEEDER_CENTER + g_feeder_center_offset);
 	EEPROM.get(FEEDER_STEPTIME_ADDR, g_time_per_enc_step);
 	EEPROM.get(FEEDER_MM_PER_STEP_ADDR, g_feeder_100x_mm_per_step);
+	EEPROM.get(HOLE_OFFSET_ADDR, g_hole_offset_100x_mm);
 
 	Serial.begin(115200);
 }
@@ -93,6 +101,7 @@ void setup() {
 void calibrateStepTime();
 void performCuttingSeq();
 void cycleCutter();
+void cycleHoller();
 void mmPerStepCalCut();
 void moveToTarget(int target, int move_dir = 50);
 
@@ -105,10 +114,37 @@ void loop() {
 		calibrateStepTime();
 		curr_menu = EMenu::Main;
 		return;
+	} else if (curr_menu == EMenu::SetHoleOffset) {
+		int32_t inpt = g_input_enc.read() / 2;
+
+		int32_t result = abs(g_hole_offset_100x_mm + inpt * 25);
+
+		String text = toString100xFloat(result) + String("mm");
+
+		g_screen.stroke(255, 255, 255);
+		g_screen.noFill();
+
+		g_screen.textWrap(text.c_str(), 5, 20);
+
+		if (!digitalRead(INPUT_ENC_SW) && !g_button_flag) {
+			g_button_flag = true;
+		} else if (digitalRead(INPUT_ENC_SW) && g_button_flag) {
+			g_button_flag = false;
+			g_hole_offset_100x_mm = result;
+			EEPROM.put(HOLE_OFFSET_ADDR, g_hole_offset_100x_mm);
+			curr_menu = EMenu::Main;
+			g_input_enc.readAndReset();
+		}
+
+		delay(100);
+		g_screen.stroke(0,0,0);
+		g_screen.textWrap(text.c_str(), 5, 20);
+
+		return;
 	} else if (curr_menu == EMenu::CalibrateFeederByRoller) {
 		int inpt = g_input_enc.read() / 2;
 
-		int16_t result = abs(inpt) * 25;
+		int16_t result = abs(g_feeder_100x_mm_per_step - inpt * 25);
 
 		String text = toString100xFloat(result) + String("mm");
 
@@ -173,7 +209,7 @@ void loop() {
 		g_screen.textWrap(text.c_str(), 5, 20);
 
 		if (cutter_manual_move_target != result) {
-			moveToTarget(abs(cutter_manual_move_target-result), ((cutter_manual_move_target-result) > 0) ? FEEDER_FEED_SPEED : -FEEDER_FEED_SPEED);
+			moveToTarget(cutter_manual_move_target-result, FEEDER_FEED_SPEED);
 			cutter_manual_move_target = result;
 		}
 
@@ -193,7 +229,7 @@ void loop() {
 
 		return;
 	} else if (curr_menu == EMenu::Control) {
-		int inpt = abs(g_input_enc.read() / 2) % 3;
+		int inpt = abs(g_input_enc.read() / 2) % 4;
 
 		String text;
 
@@ -205,6 +241,9 @@ void loop() {
 			text = "cycle cutter";
 			break;
 		case 2:
+			text = "cycle holler";
+			break;
+		case 3:
 			text = "back";
 			break;
 		}
@@ -227,6 +266,9 @@ void loop() {
 				cycleCutter();
 				break;
 			case 2:
+				cycleHoller();
+				break;
+			case 3:
 				curr_menu = EMenu::Main;
 				g_input_enc.readAndReset();
 				break;
@@ -326,7 +368,7 @@ void loop() {
 		curr_menu = EMenu::Main;
 		return;
 	} else {
-		int inpt = abs(g_input_enc.read() / 2) % 6;
+		int inpt = abs(g_input_enc.read() / 2) % 7;
 
 
 		String text;
@@ -349,6 +391,9 @@ void loop() {
 			break;
 		case 5:
 			text = "cal by roller";
+			break;
+		case 6:
+			text = "set hole offset";
 			break;
 		}
 
@@ -381,6 +426,9 @@ void loop() {
 			case 5:
 				curr_menu = EMenu::CalibrateFeederByRoller;
 				break;
+			case 6:
+				curr_menu = EMenu::SetHoleOffset;
+				break;
 			}
 			g_input_enc.readAndReset();
 		}
@@ -411,7 +459,7 @@ void calibrateStepTime() {
 
 		// do same thing but in the other direction
 		start = millis();
-		moveToTarget(g_feeder_100x_mm_per_step, -FEEDER_FEED_SPEED);
+		moveToTarget(-g_feeder_100x_mm_per_step, FEEDER_FEED_SPEED);
 		diff = millis() - start;
 		avrg += diff;
 	}
@@ -436,31 +484,20 @@ void cycleCutter() {
 	delay(700);
 }
 
-void moveToTarget(int target, int move_dir = 50) {
+void cycleHoller() {
+	g_holler.write(0);
+	delay(1000);
+	g_holler.write(180);
+	delay(1000);
+}
+
+void moveToTarget(int32_t target, uint32_t move_dir = 50) {
+	int32_t move_dir2 = (target > 0) move_dir : -move_dir;
+	uint32_t target2 = abs(target);
 	g_feeder_enc.readAndReset();
-	// if (target%g_feeder_100x_mm_per_step == 0 || g_time_per_enc_step == 0) {
-		while ((target - (abs(g_feeder_enc.read() / 2) * g_feeder_100x_mm_per_step)) > 0) {
-			g_feeder.write((FEEDER_CENTER + g_feeder_center_offset) + move_dir);
-			// delay(10);
-		}
-	// } else if (g_time_per_enc_step != 0) {
-	// 	if (target > g_feeder_100x_mm_per_step) {
-	// 		int tmp_target = target - target % g_feeder_100x_mm_per_step;
-	// 		while ((tmp_target - abs(g_feeder_enc.read() / 2) * g_feeder_100x_mm_per_step) > 0) {
-	// 			g_feeder.write((FEEDER_CENTER + g_feeder_center_offset) + move_dir);
-	// 			delay(10);
-	// 		}
-	// 		g_feeder.write((FEEDER_CENTER + g_feeder_center_offset));
-	// 		target = target % g_feeder_100x_mm_per_step;
-	// 	}
-	// 	if (target < g_feeder_100x_mm_per_step) {
-	// 		g_feeder.write((FEEDER_CENTER + g_feeder_center_offset)
-	// 			+ ((move_dir > 0) ? FEEDER_FEED_SPEED : -FEEDER_FEED_SPEED));
-	// 		delay(g_time_per_enc_step / 2);
-	// 		g_feeder.write((FEEDER_CENTER + g_feeder_center_offset));
-	// 		return;
-	// 	}
-	// }
+	while ((target2 - (abs(g_feeder_enc.read() / 2) * g_feeder_100x_mm_per_step)) > 0) {
+		g_feeder.write((FEEDER_CENTER + g_feeder_center_offset) + move_dir2);
+	}
 	g_feeder.write((FEEDER_CENTER + g_feeder_center_offset));
 }
 
@@ -482,8 +519,18 @@ void performCuttingSeq() {
 
 		g_screen.textWrap(text.c_str(), 5, 20);
 
-		moveToTarget(target_len, FEEDER_FEED_SPEED);
-		cycleCutter();
+		if (g_hole_offset_100x_mm == 0) {
+			moveToTarget(target_len, FEEDER_FEED_SPEED);
+			cycleCutter();
+		} else {
+			// funny formula to calculate direction offset for the hole
+			int32_t move_result = -(FEEDER_TO_HOLLER_OFFSET - target_len + g_hole_offset_100x_mm);
+			moveToTarget(move_result, FEEDER_FEED_SPEED);
+			cycleHoller();
+			moveToTarget(FEEDER_TO_HOLLER_OFFSET + g_hole_offset_100x_mm, FEEDER_FEED_SPEED);
+			cycleCutter();
+		}
+
 		g_screen.stroke(0,0,0);
 		g_screen.textWrap(text.c_str(), 5, 20);
 	}
