@@ -103,7 +103,7 @@ void performCuttingSeq();
 void cycleCutter();
 void cycleHoller();
 void mmPerStepCalCut();
-void moveToTarget(int target, int move_dir = 50);
+void moveToTarget(const int32_t target, const uint32_t move_dir = 50);
 
 String toString100xFloat(int32_t value) {
 	return String(value / 100) + String(".") + String(abs(value) % 100);
@@ -117,7 +117,7 @@ void loop() {
 	} else if (curr_menu == EMenu::SetHoleOffset) {
 		int32_t inpt = g_input_enc.read() / 2;
 
-		int32_t result = abs(g_hole_offset_100x_mm + inpt * 25);
+		int32_t result = abs(inpt) * g_feeder_100x_mm_per_step;
 
 		String text = toString100xFloat(result) + String("mm");
 
@@ -144,7 +144,7 @@ void loop() {
 	} else if (curr_menu == EMenu::CalibrateFeederByRoller) {
 		int inpt = g_input_enc.read() / 2;
 
-		int16_t result = abs(g_feeder_100x_mm_per_step - inpt * 25);
+		int16_t result = abs(inpt * 25);
 
 		String text = toString100xFloat(result) + String("mm");
 
@@ -491,11 +491,13 @@ void cycleHoller() {
 	delay(1000);
 }
 
-void moveToTarget(int32_t target, uint32_t move_dir = 50) {
-	int32_t move_dir2 = (target > 0) move_dir : -move_dir;
-	uint32_t target2 = abs(target);
+void moveToTarget(const int32_t target, const uint32_t move_dir = 50) {
+	int32_t move_dir2 = (target > 0) ? static_cast<int32_t>(move_dir) : -static_cast<int32_t>(move_dir);
+	int32_t target2 = abs(target);
 	g_feeder_enc.readAndReset();
 	while ((target2 - (abs(g_feeder_enc.read() / 2) * g_feeder_100x_mm_per_step)) > 0) {
+		// Serial.println(target2);
+		// Serial.println((abs(g_feeder_enc.read() / 2) * g_feeder_100x_mm_per_step));
 		g_feeder.write((FEEDER_CENTER + g_feeder_center_offset) + move_dir2);
 	}
 	g_feeder.write((FEEDER_CENTER + g_feeder_center_offset));
@@ -524,7 +526,8 @@ void performCuttingSeq() {
 			cycleCutter();
 		} else {
 			// funny formula to calculate direction offset for the hole
-			int32_t move_result = -(FEEDER_TO_HOLLER_OFFSET - target_len + g_hole_offset_100x_mm);
+			int32_t move_result = -static_cast<int32_t>(static_cast<int32_t>(FEEDER_TO_HOLLER_OFFSET) - static_cast<int32_t>(target_len) + g_hole_offset_100x_mm);
+			Serial.println(move_result);
 			moveToTarget(move_result, FEEDER_FEED_SPEED);
 			cycleHoller();
 			moveToTarget(FEEDER_TO_HOLLER_OFFSET + g_hole_offset_100x_mm, FEEDER_FEED_SPEED);
