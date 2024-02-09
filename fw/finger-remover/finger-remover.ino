@@ -4,8 +4,8 @@
 #define CUTTER_PIN 4
 #define HOLLER_PIN 5
 
-#define FEEDER_ENC_A 0
-#define FEEDER_ENC_B 1
+#define FEEDER_ENC_A 1
+#define FEEDER_ENC_B 0
 
 #define INPUT_ENC_SW 7
 #define INPUT_ENC_A 2
@@ -15,9 +15,13 @@
 #define TFT_DISP_RESET 9
 #define TFT_DISP_CS 10
 
+
+#define CUTTER_OPEN 110
+#define CUTTER_CLOSED 180
+
 #define FEEDER_CENTER 1500
 #define FEEDER_FEED_SPEED 100
-#define FEEDER_TO_HOLLER_OFFSET 3800 // in mm * 100, hardware set, cannot be changed
+#define FEEDER_TO_HOLLER_OFFSET 4685 // in mm * 100, hardware set, cannot be changed
 
 // persistent memory addresses
 #define FEEDER_CENTOFF_ADDR 0
@@ -78,7 +82,7 @@ void setup() {
 	g_cutter.attach(CUTTER_PIN);
 	g_holler.attach(HOLLER_PIN);
 
-	g_cutter.write(180);
+	g_cutter.write(CUTTER_OPEN);
 	g_holler.write(180);
 
 	pinMode(INPUT_ENC_SW, INPUT_PULLUP);
@@ -470,18 +474,14 @@ void calibrateStepTime() {
 }
 
 void cycleCutter() {
-	g_holler.write(60);
-	delay(300);
-	g_cutter.write(0);
+	// g_holler.write(60);
+	// delay(300);
+	g_cutter.write(CUTTER_CLOSED);
 	delay(1000);
-	g_cutter.write(90);
-	delay(1000);
-	g_cutter.write(0);
-	delay(500);
-	g_cutter.write(180);
+	g_cutter.write(CUTTER_OPEN);
 	delay(600);
-	g_holler.write(180);
-	delay(700);
+	// g_holler.write(180);
+	// delay(700);
 }
 
 void cycleHoller() {
