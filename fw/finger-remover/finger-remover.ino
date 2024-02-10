@@ -18,6 +18,9 @@
 
 #define CUTTER_OPEN 110
 #define CUTTER_CLOSED 180
+#define HOLLER_OPEN 0
+#define HOLLER_CLOSED 180
+
 
 #define FEEDER_CENTER 1500
 #define FEEDER_FEED_SPEED 100
@@ -84,7 +87,7 @@ void setup() {
 	g_holler.attach(HOLLER_PIN);
 
 	g_cutter.write(CUTTER_OPEN);
-	g_holler.write(180);
+	g_holler.write(HOLLER_OPEN);
 
 	pinMode(INPUT_ENC_SW, INPUT_PULLUP);
 
@@ -179,7 +182,7 @@ void loop() {
 		int inpt = g_input_enc.read() / 2;
 
 		float result = static_cast<float>(inpt) * 0.1f;
-		result = g_feeder_mm_per_step - result
+		result = g_feeder_mm_per_step - result;
 
 		String text = toString100xFloat(result) + String("mm");
 
@@ -526,9 +529,9 @@ void cycleCutter() {
 }
 
 void cycleHoller() {
-	g_holler.write(0);
+	g_holler.write(HOLLER_CLOSED);
 	delay(1000);
-	g_holler.write(180);
+	g_holler.write(HOLLER_OPEN);
 	delay(1000);
 }
 
