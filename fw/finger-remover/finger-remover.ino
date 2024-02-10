@@ -21,7 +21,7 @@
 
 #define FEEDER_CENTER 1500
 #define FEEDER_FEED_SPEED 100
-#define FEEDER_TO_HOLLER_OFFSET 4685 // in mm * 100, hardware set, cannot be changed
+#define FEEDER_TO_HOLLER_OFFSET 45.85f // in mm, hardware set, cannot be changed
 
 // persistent memory addresses
 #define FEEDER_CENTOFF_ADDR 0
@@ -29,7 +29,7 @@
 #define FEEDER_MM_PER_STEP_ADDR 64
 #define HOLE_OFFSET_ADDR 128
 
-#define M_PI 3.14159265359
+#define M_PI 3.14159265359f
 
 #include <Servo.h>
 #include <Encoder.h>
@@ -67,16 +67,16 @@ enum class EMenu: uint8_t {
 EMenu curr_menu = EMenu::Main;
 
 // op states
-uint16_t target_len = 0;
+float target_len = 0.0f;
 uint16_t target_rep = 0;
-int16_t cutter_manual_move_target = 0;
+float cutter_manual_move_target = 0.0f;
 bool g_button_flag = false;
 
 // persistency
 int16_t g_feeder_center_offset = 0;
 uint32_t g_time_per_enc_step = 0;
-int32_t g_feeder_100x_mm_per_step = 100;
-int32_t g_hole_offset_100x_mm = 0;
+float g_feeder_mm_per_step = 1.0f;
+float g_hole_offset_mm = 0.0f;
 
 void setup() {
 	g_cutter.attach(CUTTER_PIN);
@@ -96,8 +96,8 @@ void setup() {
 	g_feeder.attach(FEEDER_PIN);
 	g_feeder.writeMicroseconds(FEEDER_CENTER + g_feeder_center_offset);
 	EEPROM.get(FEEDER_STEPTIME_ADDR, g_time_per_enc_step);
-	EEPROM.get(FEEDER_MM_PER_STEP_ADDR, g_feeder_100x_mm_per_step);
-	EEPROM.get(HOLE_OFFSET_ADDR, g_hole_offset_100x_mm);
+	EEPROM.get(FEEDER_MM_PER_STEP_ADDR, g_feeder_mm_per_step);
+	EEPROM.get(HOLE_OFFSET_ADDR, g_hole_offset_mm);
 
 	Serial.begin(115200);
 }
@@ -107,10 +107,10 @@ void performCuttingSeq();
 void cycleCutter();
 void cycleHoller();
 void mmPerStepCalCut();
-void moveToTarget(const int32_t target, const uint32_t move_dir = 50);
+void moveToTarget(const float target, const uint32_t move_dir = 50);
 
-String toString100xFloat(int32_t value) {
-	return String(value / 100) + String(".") + String(abs(value) % 100);
+String toString100xFloat(float value) {
+	return String(value, 3);
 }
 
 void loop() {
@@ -121,7 +121,7 @@ void loop() {
 	} else if (curr_menu == EMenu::SetHoleOffset) {
 		int32_t inpt = g_input_enc.read() / 2;
 
-		int32_t result = abs(inpt) * g_feeder_100x_mm_per_step;
+		float result = static_cast<float>(abs(inpt)) * g_feeder_mm_per_step;
 
 		String text = toString100xFloat(result) + String("mm");
 
@@ -134,8 +134,8 @@ void loop() {
 			g_button_flag = true;
 		} else if (digitalRead(INPUT_ENC_SW) && g_button_flag) {
 			g_button_flag = false;
-			g_hole_offset_100x_mm = result;
-			EEPROM.put(HOLE_OFFSET_ADDR, g_hole_offset_100x_mm);
+			g_hole_offset_mm = result;
+			EEPROM.put(HOLE_OFFSET_ADDR, g_hole_offset_mm);
 			curr_menu = EMenu::Main;
 			g_input_enc.readAndReset();
 		}
@@ -148,7 +148,7 @@ void loop() {
 	} else if (curr_menu == EMenu::CalibrateFeederByRoller) {
 		int inpt = g_input_enc.read() / 2;
 
-		int16_t result = abs(inpt * 25);
+		float result = static_cast<float>(abs(inpt)) * 0.1f;
 
 		String text = toString100xFloat(result) + String("mm");
 
@@ -161,8 +161,8 @@ void loop() {
 			g_button_flag = true;
 		} else if (digitalRead(INPUT_ENC_SW) && g_button_flag) {
 			g_button_flag = false;
-			g_feeder_100x_mm_per_step = static_cast<int32_t>(static_cast<float>(result) * M_PI / 15 / 2);
-			EEPROM.put(FEEDER_MM_PER_STEP_ADDR, g_feeder_100x_mm_per_step);
+			g_feeder_mm_per_step = (result * M_PI / 15.0f / 2.0f);
+			EEPROM.put(FEEDER_MM_PER_STEP_ADDR, g_feeder_mm_per_step);
 			curr_menu = EMenu::Main;
 			g_input_enc.readAndReset();
 		}
@@ -175,9 +175,9 @@ void loop() {
 	} else if (curr_menu == EMenu::CalibrateFeederMMPerStep) {
 		int inpt = g_input_enc.read() / 2;
 
-		uint16_t result = abs(inpt);
+		float result = static_cast<float>(abs(inpt));
 
-		String text = String(result) + String("mm");
+		String text = toString100xFloat(result) + String("mm");
 
 		g_screen.stroke(255, 255, 255);
 		g_screen.noFill();
@@ -188,8 +188,8 @@ void loop() {
 			g_button_flag = true;
 		} else if (digitalRead(INPUT_ENC_SW) && g_button_flag) {
 			g_button_flag = false;
-			g_feeder_100x_mm_per_step = result;
-			EEPROM.put(FEEDER_MM_PER_STEP_ADDR, g_feeder_100x_mm_per_step);
+			g_feeder_mm_per_step = result / 100.0f;
+			EEPROM.put(FEEDER_MM_PER_STEP_ADDR, g_feeder_mm_per_step);
 			curr_menu = EMenu::Main;
 			g_input_enc.readAndReset();
 		}
@@ -203,9 +203,9 @@ void loop() {
 	} else if (curr_menu == EMenu::ControlFeeder) {
 		int inpt = g_input_enc.read() / 2;
 
-		int result = inpt * g_feeder_100x_mm_per_step;
+		float result = static_cast<float>(inpt) * g_feeder_mm_per_step;
 
-		String text = toString100xFloat(result);
+		String text = toString100xFloat(result) + String("mm");
 
 		g_screen.stroke(255, 255, 255);
 		g_screen.noFill();
@@ -223,7 +223,7 @@ void loop() {
 			g_button_flag = false;
 
 			curr_menu = EMenu::Control;
-			cutter_manual_move_target = 0;
+			cutter_manual_move_target = 0.0f;
 			g_input_enc.readAndReset();
 		}
 
@@ -318,7 +318,7 @@ void loop() {
 	} else if (curr_menu == EMenu::StartSetLen) {
 		int inpt = g_input_enc.read() / 2;
 
-		uint16_t result = abs(inpt) * g_feeder_100x_mm_per_step;
+		float result = static_cast<float>(abs(inpt)) * g_feeder_mm_per_step;
 
 		String text = toString100xFloat(result) + String("mm");
 
@@ -450,20 +450,20 @@ void loop() {
 
 void calibrateStepTime() {
 	// make sure we are at the edge of a step rn
-	moveToTarget(g_feeder_100x_mm_per_step, FEEDER_FEED_SPEED);
+	moveToTarget(g_feeder_mm_per_step, FEEDER_FEED_SPEED);
 
 	uint32_t avrg = 0;
 
 	for (int i=0; i < 10; i++) {
 		// time moving one step
 		uint32_t start = millis();
-		moveToTarget(g_feeder_100x_mm_per_step, FEEDER_FEED_SPEED);
+		moveToTarget(g_feeder_mm_per_step, FEEDER_FEED_SPEED);
 		uint32_t diff = millis() - start;
 		avrg += diff;
 
 		// do same thing but in the other direction
 		start = millis();
-		moveToTarget(-g_feeder_100x_mm_per_step, FEEDER_FEED_SPEED);
+		moveToTarget(-g_feeder_mm_per_step, FEEDER_FEED_SPEED);
 		diff = millis() - start;
 		avrg += diff;
 	}
@@ -491,13 +491,13 @@ void cycleHoller() {
 	delay(1000);
 }
 
-void moveToTarget(const int32_t target, const uint32_t move_dir = 50) {
+void moveToTarget(const float target, const uint32_t move_dir = 50) {
 	int32_t move_dir2 = (target > 0) ? static_cast<int32_t>(move_dir) : -static_cast<int32_t>(move_dir);
-	int32_t target2 = abs(target);
+	float target2 = abs(target);
 	g_feeder_enc.readAndReset();
-	while ((target2 - (abs(g_feeder_enc.read() / 2) * g_feeder_100x_mm_per_step)) > 0) {
+	while ((target2 - (static_cast<float>(abs(g_feeder_enc.read() / 2)) * g_feeder_mm_per_step)) > 0) {
 		// Serial.println(target2);
-		// Serial.println((abs(g_feeder_enc.read() / 2) * g_feeder_100x_mm_per_step));
+		// Serial.println((abs(g_feeder_enc.read() / 2) * g_feeder_mm_per_step));
 		g_feeder.write((FEEDER_CENTER + g_feeder_center_offset) + move_dir2);
 	}
 	g_feeder.write((FEEDER_CENTER + g_feeder_center_offset));
@@ -521,16 +521,16 @@ void performCuttingSeq() {
 
 		g_screen.textWrap(text.c_str(), 5, 20);
 
-		if (g_hole_offset_100x_mm == 0) {
+		if (g_hole_offset_mm == 0) {
 			moveToTarget(target_len, FEEDER_FEED_SPEED);
 			cycleCutter();
 		} else {
 			// funny formula to calculate direction offset for the hole
-			int32_t move_result = -static_cast<int32_t>(static_cast<int32_t>(FEEDER_TO_HOLLER_OFFSET) - static_cast<int32_t>(target_len) + g_hole_offset_100x_mm);
+			int32_t move_result = -static_cast<float>(FEEDER_TO_HOLLER_OFFSET - target_len + g_hole_offset_mm);
 			Serial.println(move_result);
 			moveToTarget(move_result, FEEDER_FEED_SPEED);
 			cycleHoller();
-			moveToTarget(FEEDER_TO_HOLLER_OFFSET + g_hole_offset_100x_mm, FEEDER_FEED_SPEED);
+			moveToTarget(FEEDER_TO_HOLLER_OFFSET + g_hole_offset_mm, FEEDER_FEED_SPEED);
 			cycleCutter();
 		}
 
