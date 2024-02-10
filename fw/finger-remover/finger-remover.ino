@@ -162,7 +162,9 @@ void loop() {
 		} else if (digitalRead(INPUT_ENC_SW) && g_button_flag) {
 			g_button_flag = false;
 			g_feeder_mm_per_step = (result * M_PI / 15.0f / 2.0f);
+			g_hole_offset_mm = 0.0f;
 			EEPROM.put(FEEDER_MM_PER_STEP_ADDR, g_feeder_mm_per_step);
+			EEPROM.put(HOLE_OFFSET_ADDR, g_hole_offset_mm);
 			curr_menu = EMenu::Main;
 			g_input_enc.readAndReset();
 		}
@@ -189,7 +191,9 @@ void loop() {
 		} else if (digitalRead(INPUT_ENC_SW) && g_button_flag) {
 			g_button_flag = false;
 			g_feeder_mm_per_step = result / 100.0f;
+			g_hole_offset_mm = 0.0f;
 			EEPROM.put(FEEDER_MM_PER_STEP_ADDR, g_feeder_mm_per_step);
+			EEPROM.put(HOLE_OFFSET_ADDR, g_hole_offset_mm);
 			curr_menu = EMenu::Main;
 			g_input_enc.readAndReset();
 		}
