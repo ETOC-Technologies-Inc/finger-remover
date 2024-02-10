@@ -54,6 +54,7 @@ enum class EMenu: uint8_t {
 	Main = 0,
 	CalibrateHalfStep,
 	CalibrateFeederCenter,
+	SetFeederMMPerStep,
 	CalibrateFeederMMPerStep,
 	CalibrateFeederByRoller,
 	SetHoleOffset,
@@ -162,6 +163,36 @@ void loop() {
 		} else if (digitalRead(INPUT_ENC_SW) && g_button_flag) {
 			g_button_flag = false;
 			g_feeder_mm_per_step = (result * M_PI / 15.0f / 2.0f);
+			g_hole_offset_mm = 0.0f;
+			EEPROM.put(FEEDER_MM_PER_STEP_ADDR, g_feeder_mm_per_step);
+			EEPROM.put(HOLE_OFFSET_ADDR, g_hole_offset_mm);
+			curr_menu = EMenu::Main;
+			g_input_enc.readAndReset();
+		}
+
+		delay(100);
+		g_screen.stroke(0,0,0);
+		g_screen.textWrap(text.c_str(), 5, 20);
+
+		return;
+	} else if (curr_menu == EMenu::SetFeederMMPerStep) {
+		int inpt = g_input_enc.read() / 2;
+
+		float result = static_cast<float>(inpt) * 0.1f;
+		result = g_feeder_mm_per_step - result
+
+		String text = toString100xFloat(result) + String("mm");
+
+		g_screen.stroke(255, 255, 255);
+		g_screen.noFill();
+
+		g_screen.textWrap(text.c_str(), 5, 20);
+
+		if (!digitalRead(INPUT_ENC_SW) && !g_button_flag) {
+			g_button_flag = true;
+		} else if (digitalRead(INPUT_ENC_SW) && g_button_flag) {
+			g_button_flag = false;
+			g_feeder_mm_per_step = result;
 			g_hole_offset_mm = 0.0f;
 			EEPROM.put(FEEDER_MM_PER_STEP_ADDR, g_feeder_mm_per_step);
 			EEPROM.put(HOLE_OFFSET_ADDR, g_hole_offset_mm);
@@ -376,7 +407,7 @@ void loop() {
 		curr_menu = EMenu::Main;
 		return;
 	} else {
-		int inpt = abs(g_input_enc.read() / 2) % 7;
+		int inpt = abs(g_input_enc.read() / 2) % 8;
 
 
 		String text;
@@ -401,6 +432,9 @@ void loop() {
 			text = "cal by roller";
 			break;
 		case 6:
+			text = "set per step cal";
+			break;
+		case 7:
 			text = "set hole offset";
 			break;
 		}
@@ -435,6 +469,9 @@ void loop() {
 				curr_menu = EMenu::CalibrateFeederByRoller;
 				break;
 			case 6:
+				curr_menu = EMenu::SetFeederMMPerStep;
+				break;
+			case 7:
 				curr_menu = EMenu::SetHoleOffset;
 				break;
 			}
